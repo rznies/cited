@@ -24,14 +24,22 @@ export function liveFirecrawl(
   checkLlms(domain: string): Promise<boolean>;
 } {
   const headers = { authorization: `Bearer ${apiKey}`, "content-type": "application/json" };
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  /** One retry on 429 (burst limit) after 5s; anything else throws immediately. */
+  async function post(path: string, body: unknown): Promise<Response> {
+    const res = await fetchFn(`${BASE}${path}`, { method: "POST", headers, body: JSON.stringify(body) });
+    if (res.status === 429) {
+      await sleep(5000);
+      const retry = await fetchFn(`${BASE}${path}`, { method: "POST", headers, body: JSON.stringify(body) });
+      if (!retry.ok) throw new Error(`firecrawl ${path} ${retry.status}`);
+      return retry;
+    }
+    if (!res.ok) throw new Error(`firecrawl ${path} ${res.status}`);
+    return res;
+  }
   return {
     async search(phrase: string): Promise<SearchHit[]> {
-      const res = await fetchFn(`${BASE}/v2/search`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ query: phrase, limit: 5 }),
-      });
-      if (!res.ok) throw new Error(`firecrawl search ${res.status}`);
+      const res = await post("/v2/search", { query: phrase, limit: 5 });
       const json = (await res.json()) as SearchResponse;
       return (json.data?.web ?? []).map((w) => ({
         url: w.url ?? "",
@@ -40,12 +48,7 @@ export function liveFirecrawl(
       }));
     },
     async scrape(url: string): Promise<ScrapedPage> {
-      const res = await fetchFn(`${BASE}/v2/scrape`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ url, formats: ["markdown", "html"] }),
-      });
-      if (!res.ok) throw new Error(`firecrawl scrape ${res.status}`);
+      const res = await post("/v2/scrape", { url, formats: ["markdown", "html"] });
       const json = (await res.json()) as ScrapeResponse;
       return { markdown: json.data?.markdown ?? "", html: json.data?.html ?? "" };
     },

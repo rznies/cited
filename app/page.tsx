@@ -5,6 +5,7 @@ import PasteBox from "@/components/PasteBox";
 import TeaserGate from "@/components/TeaserGate";
 import { MOCK_DOMAIN } from "@/lib/mock";
 import { generateReport } from "@/lib/seams";
+import type { AuditReport } from "@/lib/types";
 
 export default async function Home({
   searchParams,
@@ -13,7 +14,31 @@ export default async function Home({
 }) {
   const raw = (await searchParams).domain?.trim();
   const domain = raw ? raw.slice(0, 253) : MOCK_DOMAIN;
-  const report = await generateReport(domain);
+  let report: AuditReport | null = null;
+  try {
+    report = await generateReport(domain);
+  } catch {
+    report = null;
+  }
+  if (!report) {
+    return (
+      <main className="wrap">
+        <div className="card">
+          <h2>Audit unavailable right now</h2>
+          <p className="small muted">
+            The visibility check blipped (usually a rate limit — wait a minute and retry).
+            Nothing was charged, nothing was stored.
+          </p>
+          <p>
+            <a className="btn" href={`/?domain=${encodeURIComponent(domain)}`}>
+              Retry
+            </a>
+          </p>
+        </div>
+        <PasteBox domain={domain} />
+      </main>
+    );
+  }
   const teaser = report.prompts.slice(0, 2);
 
   return (

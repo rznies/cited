@@ -21,6 +21,25 @@ export interface LiveDeps {
   checkLlms(domain: string): Promise<boolean>;
 }
 
+/** Bounded parallel map: caps provider burst rate, preserves order. */
+export async function mapLimit<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const i = next;
+      next += 1;
+      out[i] = await fn(items[i]);
+    }
+  });
+  await Promise.all(workers);
+  return out;
+}
+
 function brandOf(domain: string): string {
   return domain.toLowerCase().split(".")[0].replace(/[^a-z0-9]/g, "");
 }
@@ -90,25 +109,24 @@ export function analyzeExtract(markdown: string, html: string, llmsTxt: boolean)
 /** Full live assembly — deterministic given the same provider responses. */
 export async function assembleLiveReport(domain: string, deps: LiveDeps): Promise<AuditReport> {
   const phrases = validatePrompts(await deps.promptPhrases(domain));
-  // Parallel + fail-fast: one dead search fails the run (failed/503 paths),
-  // never a silently partial score. Scrapes degrade per-page (see below).
-  const perPhrase = await Promise.all(phrases.map((phrase) => deps.search(phrase)));
+  // Bounded parallel + fail-fast: max 3 in flight (burst 429s), one dead
+  // search fails the run (failed/503 paths), never a silently partial score.
+  // Scrapes degrade per-page (see below).
+  const perPhrase = await mapLimit(phrases, 3, (phrase) => deps.search(phrase));
   const prompts: BuyerPrompt[] = phrases.map((text, i) => {
     const { cited, citedBy } = citationsFor(perPhrase[i], domain);
     return { text, cited, citedBy };
   });
   const winners = aggregateWinners(perPhrase, domain);
   const pages = [domain, ...winners.map((w) => w.page)];
-  const scraped = await Promise.all(
-    pages.map(async (url) => {
-      const target = url.startsWith("http") ? url : `https://${url}`;
-      try {
-        return await deps.scrape(target);
-      } catch {
-        return { markdown: "", html: "" };
-      }
-    }),
-  );
+  const scraped = await mapLimit(pages, 3, async (url) => {
+    const target = url.startsWith("http") ? url : `https://${url}`;
+    try {
+      return await deps.scrape(target);
+    } catch {
+      return { markdown: "", html: "" };
+    }
+  });
   const llms = await deps.checkLlms(domain).catch(() => false);
   const extracts = scraped.map((s) => analyzeExtract(s.markdown, s.html, false));
   const self = extracts[0];
