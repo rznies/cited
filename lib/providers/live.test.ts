@@ -5,6 +5,7 @@ import {
   analyzeExtract,
   assembleLiveReport,
   citationsFor,
+  mapLimit,
   type LiveDeps,
   type SearchHit,
 } from "./live";
@@ -14,6 +15,30 @@ const HITS: SearchHit[] = [
   { url: "https://followupboss.com/realtor-crm", title: "FollowUpBoss realtor CRM", description: "leader" },
   { url: "https://hubspot.com/crm/realtors", title: "HubSpot for realtors", description: "free crm" },
 ];
+
+describe("mapLimit (burst cap)", () => {
+  it("preserves order and never exceeds the limit", async () => {
+    let inFlight = 0;
+    let max = 0;
+    const out = await mapLimit([1, 2, 3, 4, 5, 6], 3, async (n) => {
+      inFlight += 1;
+      max = Math.max(max, inFlight);
+      await new Promise((r) => setTimeout(r, 5));
+      inFlight -= 1;
+      return n * 2;
+    });
+    expect(out).toEqual([2, 4, 6, 8, 10, 12]);
+    expect(max).toBeLessThanOrEqual(3);
+  });
+  it("fails fast on worker error", async () => {
+    await expect(
+      mapLimit([1, 2, 3], 3, async (n) => {
+        if (n === 2) throw new Error("429");
+        return n;
+      }),
+    ).rejects.toThrow("429");
+  });
+});
 
 describe("citationsFor", () => {
   it("matches the domain by host", () => {
