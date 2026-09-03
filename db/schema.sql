@@ -7,5 +7,6 @@ CREATE TABLE IF NOT EXISTS reports (
   status TEXT NOT NULL CHECK (status IN ('pending', 'ready', 'failed')),
   paid BOOLEAN NOT NULL DEFAULT FALSE,
   report_json JSONB,
+  share_token TEXT UNIQUE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

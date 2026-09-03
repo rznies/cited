@@ -61,5 +61,6 @@ export interface ReportRow {
   status: ReportStatus;
   paid: boolean;
   reportJson: AuditReport | null;
+  shareToken: string | null;
   createdAt: Date;
 }

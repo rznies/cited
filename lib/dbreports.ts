@@ -19,6 +19,7 @@ export const pgStore: ReportStore = {
       status: "ready",
       paid: existing?.paid ?? false,
       reportJson: report,
+      shareToken: existing?.shareToken ?? null,
     });
   },
   setFailed,

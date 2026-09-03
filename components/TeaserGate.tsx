@@ -111,6 +111,8 @@ export default function TeaserGate({ domain }: { domain: string }) {
   const [full, setFull] = useState<FullPayload | null>(null);
   const [price, setPrice] = useState("₹2,499.00");
   const [currency, setCurrency] = useState("INR");
+  const [shareUrl, setShareUrl] = useState("");
+  const [shareNote, setShareNote] = useState("");
   const upi = currency === "INR";
 
   // Revisit-after-payment: webhook may have marked paid while browser was away.
@@ -219,6 +221,31 @@ export default function TeaserGate({ domain }: { domain: string }) {
     }
   }
 
+  async function mintShare() {
+    setShareNote("");
+    try {
+      const res = await fetch("/api/share", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ domain }),
+      });
+      if (!res.ok) throw new Error("mint failed");
+      const data = (await res.json()) as { url: string };
+      setShareUrl(`${window.location.origin}${data.url}`);
+    } catch {
+      setShareNote("Couldn't mint the share link — retry.");
+    }
+  }
+
+  async function copy(text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setShareNote("Copied.");
+    } catch {
+      setShareNote(text);
+    }
+  }
+
   const report = full?.report ?? null;
 
   return (
@@ -267,6 +294,38 @@ export default function TeaserGate({ domain }: { domain: string }) {
         </div>
       ) : (
         <>
+          <div className="card">
+            <h3>Share + PDF</h3>
+            <p>
+              <button
+                className="btn"
+                onClick={() =>
+                  copy(`${window.location.origin}/?domain=${encodeURIComponent(domain)}`)
+                }
+              >
+                Copy teaser link
+              </button>{" "}
+              <span className="small muted">public, free slice</span>
+            </p>
+            <p>
+              {shareUrl ? (
+                <>
+                  <button className="btn" onClick={() => copy(shareUrl)}>
+                    Copy paid link
+                  </button>{" "}
+                  <a className="small" href={`/api/pdf?token=${shareUrl.split("/s/")[1] ?? ""}`}>
+                    Download PDF
+                  </a>
+                </>
+              ) : (
+                <button className="btn" onClick={mintShare}>
+                  Mint paid share link
+                </button>
+              )}{" "}
+              <span className="small muted">buyer-shareable, never leaks to teaser</span>
+            </p>
+            {shareNote && <p className="small">{shareNote}</p>}
+          </div>
           {full.cached && full.ageH >= 1 && (
             <div className="card">
               <span className="small">
