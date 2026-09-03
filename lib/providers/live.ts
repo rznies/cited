@@ -90,25 +90,25 @@ export function analyzeExtract(markdown: string, html: string, llmsTxt: boolean)
 /** Full live assembly — deterministic given the same provider responses. */
 export async function assembleLiveReport(domain: string, deps: LiveDeps): Promise<AuditReport> {
   const phrases = validatePrompts(await deps.promptPhrases(domain));
-  const perPhrase: SearchHit[][] = [];
-  for (const phrase of phrases) {
-    perPhrase.push(await deps.search(phrase));
-  }
+  // Parallel + fail-fast: one dead search fails the run (failed/503 paths),
+  // never a silently partial score. Scrapes degrade per-page (see below).
+  const perPhrase = await Promise.all(phrases.map((phrase) => deps.search(phrase)));
   const prompts: BuyerPrompt[] = phrases.map((text, i) => {
     const { cited, citedBy } = citationsFor(perPhrase[i], domain);
     return { text, cited, citedBy };
   });
   const winners = aggregateWinners(perPhrase, domain);
   const pages = [domain, ...winners.map((w) => w.page)];
-  const scraped = [];
-  for (const url of pages) {
-    const target = url.startsWith("http") ? url : `https://${url}`;
-    try {
-      scraped.push(await deps.scrape(target));
-    } catch {
-      scraped.push({ markdown: "", html: "" });
-    }
-  }
+  const scraped = await Promise.all(
+    pages.map(async (url) => {
+      const target = url.startsWith("http") ? url : `https://${url}`;
+      try {
+        return await deps.scrape(target);
+      } catch {
+        return { markdown: "", html: "" };
+      }
+    }),
+  );
   const llms = await deps.checkLlms(domain).catch(() => false);
   const extracts = scraped.map((s) => analyzeExtract(s.markdown, s.html, false));
   const self = extracts[0];

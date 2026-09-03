@@ -1,7 +1,7 @@
 // Report cache + polling core — pure orchestration over an injected store.
 // Fresh (<24h) ready rows serve cached; anything else starts (or joins) a run
 // and answers pending. The DB row is the cross-instance lock.
-import { generateReport } from "./scoring";
+import { generateReport } from "./seams";
 import type { AuditReport, ReportStatus } from "./types";
 
 export const FRESH_MS = 24 * 3_600_000;
