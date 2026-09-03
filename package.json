@@ -1,0 +1,25 @@
+{
+  "name": "cited",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AEO Visibility Audit — $29 one-time audit: does Google AI + ChatGPT recommend you, and who beats you?",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "next": "^15.5.0",
+    "pg": "^8.13.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/pg": "^8.11.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "typescript": "^5.7.0"
+  }
+}
