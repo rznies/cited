@@ -13,6 +13,7 @@
   "dependencies": {
     "next": "^15.5.0",
     "pg": "^8.13.0",
+    "razorpay": "^2.9.8",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },

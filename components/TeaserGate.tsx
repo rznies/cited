@@ -1,50 +1,194 @@
 "use client";
 
-// MOCK gate (Ticket 3a builds the real Stripe gate): full report is fetched
-// AFTER the toggle from /api/report, so paid content is never in the page
-// payload pre-pay. Nothing renders before unlock — locked means not rendered.
-import { useState } from "react";
+// $29 gate via Razorpay checkout.js (Ticket 3a): order → modal (UPI + cards) →
+// server-side signature verify → full report fetched AFTER unlock, so paid
+// content is never in the page payload pre-pay.
+import { useEffect, useState } from "react";
 import type { AuditReport } from "@/lib/types";
 
+interface CheckoutResponse {
+  razorpay_order_id: string;
+  razorpay_payment_id: string;
+  razorpay_signature: string;
+}
+
+interface RazorpayInstance {
+  open(): void;
+}
+
+interface RazorpayConstructor {
+  new (options: {
+    key: string;
+    amount: number;
+    currency: string;
+    order_id: string;
+    name: string;
+    description: string;
+    modal?: { ondismiss?: () => void };
+    handler?: (response: CheckoutResponse) => void;
+  }): RazorpayInstance;
+}
+
+declare global {
+  interface Window {
+    Razorpay?: RazorpayConstructor;
+  }
+}
+
+let checkoutScript: Promise<void> | null = null;
+
+function loadCheckout(): Promise<void> {
+  if (typeof window !== "undefined" && window.Razorpay) return Promise.resolve();
+  if (!checkoutScript) {
+    checkoutScript = new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = "https://checkout.razorpay.com/v1/checkout.js";
+      s.onload = () => resolve();
+      s.onerror = () => reject(new Error("checkout.js failed to load"));
+      document.head.appendChild(s);
+    });
+  }
+  return checkoutScript;
+}
+
+function priceLabel(amount: number, currency: string): string {
+  try {
+    return new Intl.NumberFormat(currency === "INR" ? "en-IN" : "en-US", {
+      style: "currency",
+      currency,
+    }).format(amount / 100);
+  } catch {
+    return `${amount / 100} ${currency}`;
+  }
+}
+
+type Phase = "locked" | "checking" | "ordering" | "verifying" | "unlocked" | "failed";
+
 export default function TeaserGate({ domain }: { domain: string }) {
-  const [unlocked, setUnlocked] = useState(false);
+  const [phase, setPhase] = useState<Phase>("locked");
   const [full, setFull] = useState<AuditReport | null>(null);
-  const [failed, setFailed] = useState(false);
+  const [price, setPrice] = useState("₹2,499.00");
+
+  async function fetchFull(): Promise<boolean> {
+    const res = await fetch(`/api/report?domain=${encodeURIComponent(domain)}`);
+    if (!res.ok) return false;
+    const data = (await res.json()) as { report: AuditReport };
+    setFull(data.report);
+    return true;
+  }
+
+  // Revisit-after-payment: webhook may have marked paid while browser was away.
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      try {
+        const res = await fetch(`/api/checkout?domain=${encodeURIComponent(domain)}`);
+        const data = (await res.json()) as { paid?: boolean };
+        if (live && data.paid === true && (await fetchFull())) setPhase("unlocked");
+      } catch {
+        /* offline — stays locked, retry via button */
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [domain]);
 
   async function unlock() {
-    setFailed(false);
+    setPhase("ordering");
     try {
-      const res = await fetch(`/api/report?domain=${encodeURIComponent(domain)}`);
-      if (!res.ok) throw new Error("mock fetch failed");
-      const data = (await res.json()) as { report: AuditReport };
-      setFull(data.report);
-      setUnlocked(true);
+      await loadCheckout();
+      const orderRes = await fetch("/api/checkout", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ domain }),
+      });
+      const order = (await orderRes.json()) as {
+        paid?: boolean;
+        orderId?: string;
+        amount?: number;
+        currency?: string;
+        keyId?: string;
+      };
+      if (!orderRes.ok || !order.orderId || !order.keyId) {
+        if (order.paid === true && (await fetchFull())) {
+          setPhase("unlocked");
+          return;
+        }
+        throw new Error("order failed");
+      }
+      setPrice(priceLabel(order.amount ?? 0, order.currency ?? "INR"));
+      const Razorpay = window.Razorpay;
+      if (!Razorpay) throw new Error("checkout unavailable");
+      const rzp = new Razorpay({
+        key: order.keyId,
+        amount: order.amount ?? 0,
+        currency: order.currency ?? "INR",
+        order_id: order.orderId,
+        name: "cited",
+        description: `AEO Visibility Audit — ${domain}`,
+        modal: { ondismiss: () => setPhase("locked") },
+        handler: async (response: CheckoutResponse) => {
+          setPhase("verifying");
+          try {
+            const verifyRes = await fetch("/api/verify", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({
+                domain,
+                orderId: response.razorpay_order_id,
+                paymentId: response.razorpay_payment_id,
+                signature: response.razorpay_signature,
+              }),
+            });
+            if (!verifyRes.ok || !(await fetchFull())) throw new Error("verify failed");
+            setPhase("unlocked");
+          } catch {
+            setPhase("failed");
+          }
+        },
+      });
+      rzp.open();
+      setPhase("checking");
     } catch {
-      setFailed(true);
+      setPhase("failed");
     }
   }
 
   return (
     <>
       <div className="gate">
-        <h3>
-          Unlock full audit — $29 one-time <span className="mock-tag">MOCK</span>
-        </h3>
+        <h3>Unlock full audit — {price} one-time</h3>
         <p className="small">
           10 prompts • who-beats-me + their pages • 5 fixes ordered by impact • PDF + share link
         </p>
-        <button className="btn" onClick={unlock}>
-          Unlock for $29 (mock)
-        </button>
-        {failed && (
+        {phase === "locked" || phase === "failed" ? (
+          <button className="btn" onClick={unlock}>
+            Unlock with UPI / card
+          </button>
+        ) : phase === "unlocked" ? (
+          <p>
+            <b>🔓 Unlocked.</b>
+          </p>
+        ) : (
           <p className="small">
-            Mock fetch failed. <button onClick={unlock}>Retry</button>
+            {phase === "ordering" && "Creating secure order…"}
+            {phase === "checking" && "Complete payment in the Razorpay window…"}
+            {phase === "verifying" && "Verifying payment…"}
           </p>
         )}
-        <p className="small muted">Real Stripe checkout lands in Ticket 3a.</p>
+        {phase === "failed" && (
+          <p className="small">
+            Payment didn&apos;t go through.{" "}
+            <button className="btn" onClick={unlock}>
+              Retry
+            </button>
+          </p>
+        )}
+        <p className="small muted">Secured by Razorpay (UPI + cards). Test mode.</p>
       </div>
 
-      {!unlocked || !full ? (
+      {phase !== "unlocked" || !full ? (
         <div className="card">
           <b>🔒 Full report locked.</b>{" "}
           <span className="muted">

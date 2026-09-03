@@ -5,5 +5,6 @@ CREATE TABLE IF NOT EXISTS reports (
   score INTEGER NOT NULL,
   fixes JSONB NOT NULL,
   status TEXT NOT NULL CHECK (status IN ('pending', 'ready', 'failed')),
+  paid BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

@@ -57,5 +57,6 @@ export interface ReportRow {
   score: number;
   fixes: Fix[];
   status: ReportStatus;
+  paid: boolean;
   createdAt: Date;
 }
