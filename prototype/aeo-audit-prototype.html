@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<!-- PROTOTYPE — throwaway. Question: does teaser(score+2 prompts) → $29 gate → full report convert clearly? Judge on conversion clarity, not polish. No DB, no Stripe, no Firecrawl. Mocked JSON only. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AEO Audit PROTOTYPE — ?variant=1/2/3</title>
+<style>
+  :root { --accent:#4f46e5; --bg:#fafaf9; --card:#fff; --line:#e7e5e4; --muted:#78716c; }
+  * { box-sizing:border-box; } body { font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:#1c1917; margin:0; padding:0 0 120px; }
+  .proto-stripe { background:#1c1917; color:#fbbf24; font-size:12px; padding:6px 12px; text-align:center; }
+  .demo-bar { background:#eef2ff; border-bottom:1px solid var(--line); padding:8px 12px; font-size:12px; display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .demo-bar button { font-size:12px; padding:4px 8px; border:1px solid var(--line); border-radius:6px; background:#fff; cursor:pointer; }
+  .wrap { max-width:860px; margin:0 auto; padding:20px 16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin:12px 0; }
+  .muted { color:var(--muted); font-size:13px; } .small { font-size:12px; }
+  .hero-score { font-size:56px; font-weight:800; line-height:1; }
+  .dual { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  @media(max-width:640px){ .dual{grid-template-columns:1fr;} }
+  .score-pill { text-align:center; padding:16px; border:1px solid var(--line); border-radius:12px; background:#fff; }
+  .gate { border:2px dashed var(--accent); background:#eef2ff; text-align:center; padding:20px; border-radius:12px; margin:12px 0; }
+  .btn { background:var(--accent); color:#fff; border:0; border-radius:8px; padding:10px 18px; font-size:15px; cursor:pointer; }
+  .btn-ghost { background:#fff; color:var(--accent); border:1px solid var(--accent); border-radius:8px; padding:8px 14px; cursor:pointer; }
+  table { width:100%; border-collapse:collapse; font-size:13px; } th,td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); }
+  .banner-cache { background:#fefce8; border:1px solid #fde68a; border-radius:8px; padding:8px 12px; font-size:13px; margin:12px 0; }
+  .banner-fail { background:#fef2f2; border:1px solid #fecaca; border-radius:8px; padding:12px; margin:12px 0; }
+  .blur { filter:blur(4px); user-select:none; pointer-events:none; }
+  textarea { width:100%; min-height:90px; border:1px solid var(--line); border-radius:8px; padding:8px; font-size:13px; }
+  .switcher { position:fixed; left:50%; transform:translateX(-50%); bottom:16px; background:#1c1917; color:#fff; border-radius:999px; padding:8px 12px; display:flex; gap:12px; align-items:center; box-shadow:0 8px 24px rgba(0,0,0,.25); font-size:14px; z-index:50; }
+  .switcher button { background:#44403c; color:#fff; border:0; border-radius:999px; width:32px; height:32px; cursor:pointer; font-size:16px; }
+  .fix { border-left:4px solid var(--accent); padding:8px 12px; margin:8px 0; background:#fafaff; border-radius:0 8px 8px 0; }
+  .k { display:inline-block; font-size:11px; background:#f5f3ff; color:var(--accent); border-radius:999px; padding:2px 8px; margin-right:6px; }
+  pre.state { background:#1c1917; color:#d6d3d1; font-size:11px; padding:10px; border-radius:8px; overflow:auto; }
+</style>
+</head>
+<body>
+<div class="proto-stripe">PROTOTYPE — throwaway, mocked JSON only. No DB / Stripe / Firecrawl. Variant via <b>?variant=1/2/3</b></div>
+<div class="demo-bar" id="demoBar">
+  <span><b>Demo states:</b></span>
+  <button data-act="toggleUnlock">Toggle $29 unlock</button>
+  <button data-act="toggleCache">Toggle cached-banner</button>
+  <button data-act="toggleFail">Simulate failure</button>
+  <button data-act="fillPaste">Fill paste example</button>
+  <button data-act="reset">Reset</button>
+  <span id="hallway" class="small">Hallway intent: <b id="intentCount">0</b>/5 Unlock-clicks (kill rule: &lt;2/5 = kill tracking talk)</span>
+</div>
+<div class="wrap" id="app"></div>
+<div class="switcher" id="switcher">
+  <button id="prev" aria-label="prev">←</button>
+  <span id="variantLabel">1</span>
+  <button id="next" aria-label="next">→</button>
+</div>
+<script>
+// ---- MOCKED JSON (canned Firecrawl+Gemini output, deterministic) ----
+const MOCK = {
+  domain: "acmecrm.com",
+  webScore: 42, pasteScore: 60,
+  citationPct: 30, // 3/10
+  prompts: [
+    {t:"best crm for realtors", cited:true, by:"acmecrm.com/blog/realtor-crm"},
+    {t:"realtor follow-up software", cited:true, by:"acmecrm.com/features/follow-up"},
+    {t:"simple crm for small brokerage", cited:false, by:null},
+    {t:"crm with sms for agents", cited:true, by:"acmecrm.com/features/sms"},
+    {t:"best follow-up boss alternative", cited:false, by:null},
+    {t:"crm with idx integration", cited:false, by:null},
+    {t:"affordable crm for solo agent", cited:false, by:null},
+    {t:"crm email drip for listings", cited:false, by:null},
+    {t:"realtor pipeline tool", cited:false, by:null},
+    {t:"crm with open house app", cited:false, by:null}
+  ],
+  winners: [
+    {name:"FollowUpBoss", url:"followupboss.com/realtor-crm", cites:9},
+    {name:"HubSpot", url:"hubspot.com/crm/realtors", cites:7},
+    {name:"Zoho CRM", url:"zoho.com/crm/realtors", cites:5}
+  ],
+  extract: {hasFAQ:false, hasPricingTable:false, hasSchema:false, hasLlmsTxt:false, wordCount:620, winnerAvgWords:2100},
+  fixes: [
+    {t:"Add FAQ + FAQPage schema to /realtor-crm", impact:"High", effort:"2h", d:"Winners all ship FAQ schema; you ship none. Unblocks Google AI citations."},
+    {t:"Ship /llms.txt + comparison page", impact:"High", effort:"3h", d:"No llms.txt found. Add 30-line llms.txt pointing at pricing + comparisons."},
+    {t:"Add pricing table in HTML (not JS image)", impact:"Med", effort:"2h", d:"Extract found no pricing table. AI can't quote what it can't parse."},
+    {t:"Expand realtor page 620 → 1500+ words", impact:"Med", effort:"4h", d:"Winners avg 2100 words with headings. Yours is thin."},
+    {t:"Get cited: pitch 3 listicles that cite all winners", impact:"High", effort:"1d", d:"Cited in 3/10 prompts vs FollowUpBoss 9/10. Same 3 listicles cite every winner — pitch them. (capped 1-sentence playbook, cites who-beats-me data)"}
+  ],
+  pasteResult: {mentioned:false, rank_hint:"not in pasted top-5", competitors_found:["FollowUpBoss","HubSpot"], one_fix:"Add a 'vs FollowUpBoss' section — pasted answer compares them, never you."},
+  cache: {ageH:18, note:"Cached 18h ago • Fresh check every 24h"}
+};
+// ---- in-memory state (no persistence per prototype rules) ----
+const S = {unlocked:false, showCache:true, failed:false, pasted:false, intent:0};
+const $ = s => document.querySelector(s);
+
+function params(){ return new URLSearchParams(location.search); }
+function variant(){ const v = parseInt(params().get("variant")||"1",10); return [1,2,3].includes(v)?v:1; }
+function setVariant(v){ const p=params(); p.set("variant",v); history.replaceState(null,"",location.pathname+"?"+p.toString()); render(); }
+
+function scoreDial(n){ return `<div class="hero-score">${n}<span style="font-size:18px;color:var(--muted)">/100</span></div>`; }
+function dualScores(){
+  return `<div class="dual">
+    <div class="score-pill"><div class="small muted">WEB VISIBILITY (Firecrawl)</div>${scoreDial(MOCK.webScore)}<div class="small">Cited in ${MOCK.citationPct}% (3/10 prompts)</div></div>
+    <div class="score-pill"><div class="small muted">CHATGPT PASTE SCORE</div>${scoreDial(S.pasted?MOCK.pasteScore:"–")}<div class="small">${S.pasted?"Scored from your paste":"Paste answer below to score"}</div></div>
+  </div><p class="small muted">Two scores, never blended. Web = live-ish search citations. Paste = your ChatGPT output scored by Gemini-shape {mentioned, rank, competitors, one_fix}.</p>`;
+}
+function teaserHTML(){
+  const rows = MOCK.prompts.slice(0,2).map(p=>`<tr><td>${p.t}</td><td>${p.cited?"✅ "+p.by:"❌ not cited"}</td></tr>`).join("");
+  return `<div class="card"><h3>Teaser — free (2/10 prompts)</h3><table><tr><th>Buyer prompt</th><th>You cited?</th></tr>${rows}</table>
+  <p class="small muted">Full 10 prompts + winners + fixes behind $29.</p></div>`;
+}
+function gateHTML(){
+  if(S.unlocked) return `<div class="card"><b>🔓 Unlocked ($29 paid — mocked).</b> <span class="muted">Full report below. PDF + share link + TrustMRR-Stripe-proof badge mocked.</span></div>`;
+  return `<div class="gate"><h3>Unlock full audit — $29 one-time</h3>
+    <p class="small">10 prompts • who-beats-me + their pages • 5 fixes ordered by impact • PDF + share link</p>
+    <button class="btn" id="unlockBtn">Unlock for $29 (mock)</button>
+    <p class="small muted">Hallway test: click = intent. Counted top-bar X/5.</p></div>`;
+}
+function fullHTML(){
+  const cls = S.unlocked?"":"blur";
+  const rows = MOCK.prompts.map((p,i)=>`<tr><td>${i+1}. ${p.t}</td><td>${p.cited?"✅":"❌"}</td><td class="small muted">${p.by||"—"}</td></tr>`).join("");
+  const wins = MOCK.winners.map(w=>`<tr><td><b>${w.name}</b></td><td class="small">${w.url}</td><td>${w.cites}/10</td></tr>`).join("");
+  const e = MOCK.extract;
+  const fixes = MOCK.fixes.map((f,i)=>`<div class="fix"><span class="k">#${i+1} ${f.impact}</span><b>${f.t}</b> <span class="small muted">(${f.effort})</span><div class="small">${f.d}</div></div>`).join("");
+  return `<div class="${cls}">
+    <div class="card"><h3>All 10 prompts tested</h3><table><tr><th>Prompt</th><th>Cited?</th><th>Your page</th></tr>${rows}</table></div>
+    <div class="card"><h3>Who beats you + pages to copy</h3><table><tr><th>Winner</th><th>Their page</th><th>Cites</th></tr>${wins}</table></div>
+    <div class="card"><h3>Checklist (extracted)</h3><table>
+      <tr><td>FAQ</td><td>${e.hasFAQ?"✅":"❌"}</td><td>Pricing table</td><td>${e.hasPricingTable?"✅":"❌"}</td></tr>
+      <tr><td>Schema.org</td><td>${e.hasSchema?"✅":"❌"}</td><td>llms.txt</td><td>${e.hasLlmsTxt?"✅":"❌"}</td></tr>
+      <tr><td colspan="4">Words: you ${e.wordCount} vs winners avg ${e.winnerAvgWords}</td></tr></table></div>
+    <div class="card"><h3>5 fixes, impact order (dev-shippable in a day)</h3>${fixes}</div>
+  </div>`;
+}
+function pasteHTML(){
+  const r = MOCK.pasteResult;
+  const out = S.pasted?`<div class="card"><b>Result:</b> mentioned=<b>${r.mentioned}</b> • ${r.rank_hint} • competitors: ${r.competitors_found.join(", ")}<div class="small">One fix: ${r.one_fix}</div></div>`:"";
+  return `<div class="card"><h3>ChatGPT paste-box (2nd seam: scorePaste)</h3>
+    <p class="small muted">No fake live ChatGPT. Paste any ChatGPT answer → structured score.</p>
+    <textarea id="pasteBox" placeholder="Paste ChatGPT answer here…">FollowUpBoss and HubSpot are top picks for realtors…</textarea>
+    <div style="margin-top:8px"><button class="btn-ghost" id="scorePasteBtn">Score my paste (mock)</button></div>${out}</div>`;
+}
+function banners(){
+  let h="";
+  if(S.showCache) h+=`<div class="banner-cache">📦 ${MOCK.cache.note} — showing cached report, not a 500.</div>`;
+  if(S.failed) h+=`<div class="banner-fail"><b>Firecrawl blip (simulated).</b> Showing cached copy from 18h ago. <button class="btn-ghost" id="retryBtn">Retry fresh check</button></div>`;
+  return h;
+}
+function shareHTML(){
+  return `<div class="card"><h3>Share + PDF (mocked)</h3><p class="small">Teaser link: <code>aeo-audit.test/r/acmecrm-teaser</code> (public, growth loop)<br>
+  Paid link: <code>aeo-audit.test/r/acmecrm-full-8f3k</code> (buyer-shareable) • <button class="btn-ghost">Download PDF (mock)</button><br>
+  <span class="muted">TrustMRR badge = Stripe-connected proof only, not quality endorsement.</span></p></div>`;
+}
+
+function render(){
+  const v = variant();
+  const names = {1:"1 (Score-first)",2:"2 (Who-beats-me-first)",3:"3 (Checklist-first)"};
+  document.querySelector("#variantLabel").textContent = names[v];
+  document.querySelector("#intentCount").textContent = S.intent;
+  const head = `<div class="card"><div class="small muted">DOMAIN (mocked input, no login)</div>
+    <h2 style="margin:4px 0">${MOCK.domain} <span class="small muted">— variant ${v}</span></h2>
+    <p class="small muted">Q: does Google AI + ChatGPT recommend me, and who beats me? 60-sec honest audit.</p></div>`;
+  const D=dualScores(), T=teaserHTML(), G=gateHTML(), F=fullHTML(), P=pasteHTML(), B=banners(), SH=shareHTML();
+  let body="";
+  if(v===1) body = head+B+`<div class="card"><h3>Score first</h3>${D}</div>`+T+G+F+P+SH;
+  if(v===2) body = head+B+`<div class="card"><h3>Who beats you (first)</h3><p class="small muted">FollowUpBoss 9/10, HubSpot 7/10, Zoho 5/10 — you 3/10. Score is the consequence:</p>${D}</div>`+T+G+F+P+SH;
+  if(v===3) body = head+B+`<div class="card"><h3>Checklist first</h3><p class="small muted">4/5 checks failing — here's the dev list, evidence below:</p></div>`+F+T+G+D+P+SH;
+  // for v3 full before gate looks odd when locked+blurred — keep order but gate still gates; acceptable for prototype spread
+  body += `<div class="card"><h4>State (surfaced per prototype rules)</h4><pre class="state">${JSON.stringify({variant:v,unlocked:S.unlocked,showCache:S.showCache,failed:S.failed,pasted:S.pasted,intentClicks:S.intent},null,2)}</pre></div>`;
+  document.querySelector("#app").innerHTML = body;
+  const u = document.querySelector("#unlockBtn"); if(u) u.onclick=()=>{S.intent++; S.unlocked=true; render();};
+  const sp = document.querySelector("#scorePasteBtn"); if(sp) sp.onclick=()=>{S.pasted=true; render();};
+  const rt = document.querySelector("#retryBtn"); if(rt) rt.onclick=()=>{S.failed=false; S.showCache=true; render();};
+}
+
+// demo bar + switcher wiring
+document.querySelector("#demoBar").addEventListener("click",e=>{
+  const a = e.target.dataset&&e.target.dataset.act; if(!a) return;
+  if(a==="toggleUnlock") S.unlocked=!S.unlocked;
+  if(a==="toggleCache") S.showCache=!S.showCache;
+  if(a==="toggleFail") S.failed=!S.failed;
+  if(a==="fillPaste") S.pasted=true;
+  if(a==="reset"){ S.unlocked=false; S.showCache=true; S.failed=false; S.pasted=false; }
+  render();
+});
+document.querySelector("#prev").onclick=()=>setVariant(variant()===1?3:variant()-1);
+document.querySelector("#next").onclick=()=>setVariant(variant()===3?1:variant()+1);
+document.addEventListener("keydown",e=>{
+  if(["INPUT","TEXTAREA"].includes(document.activeElement.tagName)) return;
+  if(e.key==="ArrowLeft") setVariant(variant()===1?3:variant()-1);
+  if(e.key==="ArrowRight") setVariant(variant()===3?1:variant()+1);
+});
+render();
+</script>
+</body>
+</html>
