@@ -13,6 +13,12 @@
       "skillPath": "skills/engineering/diagnosing-bugs/SKILL.md",
       "computedHash": "dcaaa3eb81195329f65f27574d9a67dc776160dd2e4d7798d1afb1e4a5f3695a"
     },
+    "gemini-api-dev": {
+      "source": "google-gemini/gemini-skills",
+      "sourceType": "github",
+      "skillPath": "skills/gemini-api-dev/SKILL.md",
+      "computedHash": "e94bba029971b6f8e092c4d2a74dca0a302c7d6e85a90dd39ec748acd2b144bd"
+    },
     "grill-me": {
       "source": "mattpocock/skills",
       "sourceType": "github",
