@@ -1,6 +1,6 @@
 // Seams — UI hangs off these; nothing else may call providers directly.
 // generateReport is REAL since Ticket 2 (deterministic assembly over canned
-// deps in ./scoring). scorePaste stays stubbed until Ticket 4.
+// deps in ./scoring). scorePaste is REAL since Ticket 4 (rule-based v1).
 import { scorePaste as analyze } from "./paste";
 import { generateReport as assemble } from "./scoring";
 import type { AuditReport, PasteScore } from "./types";

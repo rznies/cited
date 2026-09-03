@@ -75,9 +75,9 @@ interface FullPayload {
   ageH: number;
 }
 
-/** Fetches the paid report, polling through cold runs (202 pending). */
-async function fetchFull(domain: string): Promise<FullPayload | null> {
-  for (let i = 0; i < 30; i += 1) {
+/** Fetches the paid report, polling through cold runs (202 pending). Bounded. */
+async function fetchFull(domain: string, maxPolls = 30): Promise<FullPayload | null> {
+  for (let i = 0; i < maxPolls; i += 1) {
     const res = await fetch(`/api/report?domain=${encodeURIComponent(domain)}`);
     if (res.status === 202) {
       await sleep(2000);
@@ -131,12 +131,14 @@ export default function TeaserGate({ domain }: { domain: string }) {
     };
   }, [domain]);
 
-  /** Paid-but-unconfirmed: poll paid-state, auto-unlock when the webhook lands. */
+  /** Paid-but-unconfirmed: poll paid-state, auto-unlock when the webhook lands.
+   *  Bounded (~30s); the inner fetch uses short polls so the worst case stays
+   *  under ~2min, then surfaces retry. */
   async function confirmPaid(): Promise<boolean> {
     for (let i = 0; i < 10; i += 1) {
       await sleep(3000);
       if (await fetchPaid(domain)) {
-        const payload = await fetchFull(domain);
+        const payload = await fetchFull(domain, 3);
         if (payload) {
           setFull(payload);
           return true;

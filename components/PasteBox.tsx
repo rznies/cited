@@ -24,6 +24,7 @@ export default function PasteBox({ domain }: { domain: string }) {
 
   function onChange(v: string) {
     setText(v);
+    setResult(null);
     try {
       window.localStorage.setItem(key, v);
     } catch {

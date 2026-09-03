@@ -48,16 +48,17 @@ export async function getReport(domain: string): Promise<ReportRow | null> {
 
 export async function saveReport(row: Omit<ReportRow, "createdAt">): Promise<void> {
   await getPool().query(
-    `INSERT INTO reports (domain, prompts_json, score, fixes, status, paid, report_json, created_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+    `INSERT INTO reports (domain, prompts_json, score, fixes, status, paid, report_json, share_token, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
      ON CONFLICT (domain) DO UPDATE SET
        prompts_json = EXCLUDED.prompts_json,
        score = EXCLUDED.score,
        fixes = EXCLUDED.fixes,
        status = EXCLUDED.status,
        report_json = EXCLUDED.report_json,
+       share_token = EXCLUDED.share_token,
        created_at = NOW()`,
-    [row.domain, JSON.stringify(row.promptsJson), row.score, JSON.stringify(row.fixes), row.status, row.paid, JSON.stringify(row.reportJson)],
+    [row.domain, JSON.stringify(row.promptsJson), row.score, JSON.stringify(row.fixes), row.status, row.paid, JSON.stringify(row.reportJson), row.shareToken],
   );
 }
 
@@ -102,10 +103,10 @@ export async function mintShareToken(domain: string, token: string): Promise<voi
   ]);
 }
 
-/** Cron: stale ready rows due for refresh, oldest first. */
+/** Cron: stale PAID ready rows due for refresh, oldest first. */
 export async function listStaleReady(limit: number): Promise<string[]> {
   const { rows } = await getPool().query<{ domain: string }>(
-    "SELECT domain FROM reports WHERE status = 'ready' AND created_at < NOW() - INTERVAL '24 hours' ORDER BY created_at ASC LIMIT $1",
+    "SELECT domain FROM reports WHERE status = 'ready' AND paid = TRUE AND created_at < NOW() - INTERVAL '24 hours' ORDER BY created_at ASC LIMIT $1",
     [limit],
   );
   return rows.map((r) => r.domain);
