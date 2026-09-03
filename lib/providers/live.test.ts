@@ -1,5 +1,6 @@
 // Ticket 6 — provider mapping tests. Canned payloads only, zero network.
 import { describe, expect, it } from "vitest";
+import { liveFirecrawl } from "./firecrawl";
 import {
   aggregateWinners,
   analyzeExtract,
@@ -16,8 +17,7 @@ const HITS: SearchHit[] = [
   { url: "https://hubspot.com/crm/realtors", title: "HubSpot for realtors", description: "free crm" },
 ];
 
-describe("mapLimit (burst cap)", () => {
-  it("preserves order and never exceeds the limit", async () => {
+describe("mapLimit (burst cap)", () => {  it("preserves order and never exceeds the limit", async () => {
     let inFlight = 0;
     let max = 0;
     const out = await mapLimit([1, 2, 3, 4, 5, 6], 3, async (n) => {
@@ -119,4 +119,43 @@ describe("assembleLiveReport (fake deps, no network)", () => {
     expect(a.fixes).toHaveLength(5);
     expect(a.prompts[0]).toMatchObject({ cited: true });
   });
+});
+
+function stubFetch(seq: ({ ok: boolean; status: number; json: unknown } | "throw")[]) {
+  let i = 0;
+  return (async () => {
+    const next = seq[Math.min(i, seq.length - 1)];
+    i += 1;
+    if (next === "throw") throw new TypeError("fetch failed");
+    return { ok: next.ok, status: next.status, json: async () => next.json };
+  }) as unknown as typeof fetch;
+}
+
+const SEARCH_OK = { ok: true, status: 200, json: { success: true, data: { web: [] } } };
+
+describe("firecrawl post retry", () => {
+  it("rides through one 429 then succeeds", async () => {
+    const fc = liveFirecrawl("k", stubFetch([{ ok: false, status: 429, json: {} }, SEARCH_OK]));
+    expect(await fc.search("x")).toEqual([]);
+  }, 15000);
+  it("fails fast on 400 without retrying", async () => {
+    let calls = 0;
+    const fc = liveFirecrawl(
+      "k",
+      (async () => {
+        calls += 1;
+        return { ok: false, status: 400, json: async () => ({}) };
+      }) as unknown as typeof fetch,
+    );
+    await expect(fc.search("x")).rejects.toThrow("400");
+    expect(calls).toBe(1);
+  });
+  it("retries a network throw then succeeds", async () => {
+    const fc = liveFirecrawl("k", stubFetch(["throw", SEARCH_OK]));
+    expect(await fc.search("x")).toEqual([]);
+  });
+  it("gives up after exhausting retries", async () => {
+    const fc = liveFirecrawl("k", stubFetch(["throw", "throw", "throw", "throw"]));
+    await expect(fc.search("x")).rejects.toThrow();
+  }, 20000);
 });

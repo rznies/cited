@@ -56,10 +56,16 @@ describe("cleanDomain", () => {
   it("lowercases and accepts a normal domain", () => {
     expect(cleanDomain("AcmeCRM.com ")).toBe("acmecrm.com");
   });
+  it("strips scheme, path, query and port from pasted URLs", () => {
+    expect(cleanDomain("https://realtyassistant.in/F")).toBe("realtyassistant.in");
+    expect(cleanDomain("http://Example.COM:8080/pricing?x=1#top")).toBe("example.com");
+    expect(cleanDomain("www.example.com/")).toBe("www.example.com");
+  });
   it("rejects garbage", () => {
     expect(cleanDomain("not a domain")).toBeNull();
     expect(cleanDomain("")).toBeNull();
     expect(cleanDomain(42)).toBeNull();
+    expect(cleanDomain("https://")).toBeNull();
   });
 });
 

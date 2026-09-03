@@ -25,17 +25,39 @@ export function liveFirecrawl(
 } {
   const headers = { authorization: `Bearer ${apiKey}`, "content-type": "application/json" };
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-  /** One retry on 429 (burst limit) after 5s; anything else throws immediately. */
+  /**
+   * POST with bounded retries: 429 waits 5s once (burst limit); 5xx and
+   * network throws retry twice (2s, 5s). 4xx (auth/quota/shape) fails fast —
+   * retrying those burns credits and hides real errors. Anything still failing
+   * throws into the failed/503 paths, never a partial score.
+   */
   async function post(path: string, body: unknown): Promise<Response> {
-    const res = await fetchFn(`${BASE}${path}`, { method: "POST", headers, body: JSON.stringify(body) });
-    if (res.status === 429) {
-      await sleep(5000);
-      const retry = await fetchFn(`${BASE}${path}`, { method: "POST", headers, body: JSON.stringify(body) });
-      if (!retry.ok) throw new Error(`firecrawl ${path} ${retry.status}`);
-      return retry;
+    const send = () =>
+      fetchFn(`${BASE}${path}`, { method: "POST", headers, body: JSON.stringify(body) });
+    let attempt = 0;
+    for (;;) {
+      let res: Response;
+      try {
+        res = await send();
+      } catch (e) {
+        if (attempt >= 2) throw e;
+        await sleep(attempt === 0 ? 2000 : 5000);
+        attempt += 1;
+        continue;
+      }
+      if (res.ok) return res;
+      if (res.status === 429 && attempt === 0) {
+        await sleep(5000);
+        attempt += 1;
+        continue;
+      }
+      if (res.status >= 500 && attempt < 2) {
+        await sleep(attempt === 0 ? 2000 : 5000);
+        attempt += 1;
+        continue;
+      }
+      throw new Error(`firecrawl ${path} ${res.status}`);
     }
-    if (!res.ok) throw new Error(`firecrawl ${path} ${res.status}`);
-    return res;
   }
   return {
     async search(phrase: string): Promise<SearchHit[]> {
