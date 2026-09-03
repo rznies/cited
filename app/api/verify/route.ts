@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { cleanDomain } from "@/lib/domains";
+import { infra } from "@/lib/http";
 import { verifyPaymentSignature } from "@/lib/payments";
 import { markPaid } from "@/lib/store";
 
@@ -13,10 +15,10 @@ export async function POST(req: Request) {
     paymentId?: unknown;
     signature?: unknown;
   } | null;
-  const domain = typeof body?.domain === "string" ? body.domain.trim().toLowerCase() : "";
+  const domain = cleanDomain(body?.domain);
   const secret = process.env.RAZORPAY_KEY_SECRET ?? "";
   const ok =
-    domain !== "" &&
+    domain !== null &&
     verifyPaymentSignature(
       {
         orderId: typeof body?.orderId === "string" ? body.orderId : "",
@@ -26,6 +28,10 @@ export async function POST(req: Request) {
       secret,
     );
   if (!ok) return NextResponse.json({ ok: false }, { status: 400 });
-  await markPaid(domain);
+  try {
+    await markPaid(domain);
+  } catch {
+    return infra();
+  }
   return NextResponse.json({ ok: true });
 }

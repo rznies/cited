@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { cleanDomain } from "@/lib/domains";
+import { infra } from "@/lib/http";
 import { verifyWebhookSignature } from "@/lib/payments";
 import { markPaid } from "@/lib/store";
 
@@ -25,8 +27,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false }, { status: 400 });
   }
   if (event.event === "payment.captured") {
-    const domain = event.payload?.payment?.entity?.notes?.domain;
-    if (typeof domain === "string" && domain !== "") await markPaid(domain.trim().toLowerCase());
+    const domain = cleanDomain(event.payload?.payment?.entity?.notes?.domain);
+    if (domain === null) return NextResponse.json({ ok: false }, { status: 400 });
+    try {
+      await markPaid(domain);
+    } catch {
+      return infra();
+    }
   }
   return NextResponse.json({ ok: true });
 }

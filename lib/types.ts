@@ -58,5 +58,6 @@ export interface ReportRow {
   fixes: Fix[];
   status: ReportStatus;
   paid: boolean;
+  reportJson: AuditReport | null;
   createdAt: Date;
 }

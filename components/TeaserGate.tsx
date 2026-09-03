@@ -1,8 +1,11 @@
 "use client";
 
-// $29 gate via Razorpay checkout.js (Ticket 3a): order → modal (UPI + cards) →
-// server-side signature verify → full report fetched AFTER unlock, so paid
-// content is never in the page payload pre-pay.
+// $29 gate via Razorpay checkout.js (Ticket 3a) + Ticket 3b resilience:
+// order → modal (UPI + cards) → server-side signature verify → unlock.
+// Paid-but-unconfirmed buyers auto-unlock via paid-state polling (webhook can
+// land after the modal closes). Full report is fetched AFTER unlock and polls
+// through cold runs; stale copies wear a cached banner. Paid content is never
+// in the page payload pre-pay.
 import { useEffect, useState } from "react";
 import type { AuditReport } from "@/lib/types";
 
@@ -62,37 +65,84 @@ function priceLabel(amount: number, currency: string): string {
   }
 }
 
-type Phase = "locked" | "checking" | "ordering" | "verifying" | "unlocked" | "failed";
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+type Phase = "locked" | "ordering" | "checking" | "verifying" | "confirming" | "unlocked" | "failed";
+
+interface FullPayload {
+  report: AuditReport;
+  cached: boolean;
+  ageH: number;
+}
+
+/** Fetches the paid report, polling through cold runs (202 pending). */
+async function fetchFull(domain: string): Promise<FullPayload | null> {
+  for (let i = 0; i < 30; i += 1) {
+    const res = await fetch(`/api/report?domain=${encodeURIComponent(domain)}`);
+    if (res.status === 202) {
+      await sleep(2000);
+      continue;
+    }
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      report?: AuditReport;
+      cached?: boolean;
+      ageH?: number;
+    };
+    if (!data.report) return null;
+    return { report: data.report, cached: data.cached === true, ageH: data.ageH ?? 0 };
+  }
+  return null;
+}
+
+/** Paid-state read — the webhook may have landed while the modal was away. */
+async function fetchPaid(domain: string): Promise<boolean> {
+  try {
+    const res = await fetch(`/api/checkout?domain=${encodeURIComponent(domain)}`);
+    if (!res.ok) return false;
+    return ((await res.json()) as { paid?: boolean }).paid === true;
+  } catch {
+    return false;
+  }
+}
 
 export default function TeaserGate({ domain }: { domain: string }) {
   const [phase, setPhase] = useState<Phase>("locked");
-  const [full, setFull] = useState<AuditReport | null>(null);
+  const [full, setFull] = useState<FullPayload | null>(null);
   const [price, setPrice] = useState("₹2,499.00");
-
-  async function fetchFull(): Promise<boolean> {
-    const res = await fetch(`/api/report?domain=${encodeURIComponent(domain)}`);
-    if (!res.ok) return false;
-    const data = (await res.json()) as { report: AuditReport };
-    setFull(data.report);
-    return true;
-  }
+  const [currency, setCurrency] = useState("INR");
+  const upi = currency === "INR";
 
   // Revisit-after-payment: webhook may have marked paid while browser was away.
   useEffect(() => {
     let live = true;
     (async () => {
-      try {
-        const res = await fetch(`/api/checkout?domain=${encodeURIComponent(domain)}`);
-        const data = (await res.json()) as { paid?: boolean };
-        if (live && data.paid === true && (await fetchFull())) setPhase("unlocked");
-      } catch {
-        /* offline — stays locked, retry via button */
+      if (!(await fetchPaid(domain))) return;
+      const payload = await fetchFull(domain);
+      if (live && payload) {
+        setFull(payload);
+        setPhase("unlocked");
       }
     })();
     return () => {
       live = false;
     };
   }, [domain]);
+
+  /** Paid-but-unconfirmed: poll paid-state, auto-unlock when the webhook lands. */
+  async function confirmPaid(): Promise<boolean> {
+    for (let i = 0; i < 10; i += 1) {
+      await sleep(3000);
+      if (await fetchPaid(domain)) {
+        const payload = await fetchFull(domain);
+        if (payload) {
+          setFull(payload);
+          return true;
+        }
+      }
+    }
+    return false;
+  }
 
   async function unlock() {
     setPhase("ordering");
@@ -103,6 +153,7 @@ export default function TeaserGate({ domain }: { domain: string }) {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ domain }),
       });
+      if (orderRes.status === 503) throw new Error("payments unavailable");
       const order = (await orderRes.json()) as {
         paid?: boolean;
         orderId?: string;
@@ -111,13 +162,18 @@ export default function TeaserGate({ domain }: { domain: string }) {
         keyId?: string;
       };
       if (!orderRes.ok || !order.orderId || !order.keyId) {
-        if (order.paid === true && (await fetchFull())) {
-          setPhase("unlocked");
-          return;
+        if (order.paid === true) {
+          const payload = await fetchFull(domain);
+          if (payload) {
+            setFull(payload);
+            setPhase("unlocked");
+            return;
+          }
         }
         throw new Error("order failed");
       }
       setPrice(priceLabel(order.amount ?? 0, order.currency ?? "INR"));
+      setCurrency(order.currency ?? "INR");
       const Razorpay = window.Razorpay;
       if (!Razorpay) throw new Error("checkout unavailable");
       const rzp = new Razorpay({
@@ -141,8 +197,16 @@ export default function TeaserGate({ domain }: { domain: string }) {
                 signature: response.razorpay_signature,
               }),
             });
-            if (!verifyRes.ok || !(await fetchFull())) throw new Error("verify failed");
-            setPhase("unlocked");
+            if (verifyRes.ok) {
+              const payload = await fetchFull(domain);
+              if (payload) {
+                setFull(payload);
+                setPhase("unlocked");
+                return;
+              }
+            }
+            setPhase("confirming");
+            setPhase((await confirmPaid()) ? "unlocked" : "failed");
           } catch {
             setPhase("failed");
           }
@@ -155,6 +219,8 @@ export default function TeaserGate({ domain }: { domain: string }) {
     }
   }
 
+  const report = full?.report ?? null;
+
   return (
     <>
       <div className="gate">
@@ -164,7 +230,7 @@ export default function TeaserGate({ domain }: { domain: string }) {
         </p>
         {phase === "locked" || phase === "failed" ? (
           <button className="btn" onClick={unlock}>
-            Unlock with UPI / card
+            {upi ? "Unlock with UPI / card" : "Unlock with card"}
           </button>
         ) : phase === "unlocked" ? (
           <p>
@@ -175,6 +241,7 @@ export default function TeaserGate({ domain }: { domain: string }) {
             {phase === "ordering" && "Creating secure order…"}
             {phase === "checking" && "Complete payment in the Razorpay window…"}
             {phase === "verifying" && "Verifying payment…"}
+            {phase === "confirming" && "Confirming payment — one moment…"}
           </p>
         )}
         {phase === "failed" && (
@@ -185,10 +252,12 @@ export default function TeaserGate({ domain }: { domain: string }) {
             </button>
           </p>
         )}
-        <p className="small muted">Secured by Razorpay (UPI + cards). Test mode.</p>
+        <p className="small muted">
+          Secured by Razorpay ({upi ? "UPI + cards" : "cards"}). Test mode.
+        </p>
       </div>
 
-      {phase !== "unlocked" || !full ? (
+      {phase !== "unlocked" || !report || !full ? (
         <div className="card">
           <b>🔒 Full report locked.</b>{" "}
           <span className="muted">
@@ -198,6 +267,14 @@ export default function TeaserGate({ domain }: { domain: string }) {
         </div>
       ) : (
         <>
+          {full.cached && full.ageH >= 1 && (
+            <div className="card">
+              <span className="small">
+                📦 Cached {full.ageH}h ago • Fresh check every 24h — showing cached report, not an
+                error.
+              </span>
+            </div>
+          )}
           <div className="card">
             <h3>
               All 10 prompts tested <span className="mock-tag">MOCK DATA</span>
@@ -211,7 +288,7 @@ export default function TeaserGate({ domain }: { domain: string }) {
                 </tr>
               </thead>
               <tbody>
-                {full.prompts.map((p, i) => (
+                {report.prompts.map((p, i) => (
                   <tr key={i}>
                     <td>
                       {i + 1}. {p.text}
@@ -235,7 +312,7 @@ export default function TeaserGate({ domain }: { domain: string }) {
                 </tr>
               </thead>
               <tbody>
-                {full.winners.map((w) => (
+                {report.winners.map((w) => (
                   <tr key={w.name}>
                     <td>
                       <b>{w.name}</b>
@@ -254,20 +331,20 @@ export default function TeaserGate({ domain }: { domain: string }) {
               <tbody>
                 <tr>
                   <td>FAQ</td>
-                  <td>{full.extract.hasFAQ ? "✅" : "❌"}</td>
+                  <td>{report.extract.hasFAQ ? "✅" : "❌"}</td>
                   <td>Pricing table</td>
-                  <td>{full.extract.hasPricingTable ? "✅" : "❌"}</td>
+                  <td>{report.extract.hasPricingTable ? "✅" : "❌"}</td>
                 </tr>
                 <tr>
                   <td>Schema.org</td>
-                  <td>{full.extract.hasSchema ? "✅" : "❌"}</td>
+                  <td>{report.extract.hasSchema ? "✅" : "❌"}</td>
                   <td>llms.txt</td>
-                  <td>{full.extract.hasLlmsTxt ? "✅" : "❌"}</td>
+                  <td>{report.extract.hasLlmsTxt ? "✅" : "❌"}</td>
                 </tr>
                 <tr>
                   <td colSpan={4}>
-                    Words: you {full.extract.wordCount} vs winners avg{" "}
-                    {full.extract.winnerAvgWords}
+                    Words: you {report.extract.wordCount} vs winners avg{" "}
+                    {report.extract.winnerAvgWords}
                   </td>
                 </tr>
               </tbody>
@@ -276,7 +353,7 @@ export default function TeaserGate({ domain }: { domain: string }) {
 
           <div className="card">
             <h3>5 fixes, impact order (dev-shippable in a day)</h3>
-            {full.fixes.map((f, i) => (
+            {report.fixes.map((f, i) => (
               <div className="fix" key={i}>
                 <span className="mock-tag">
                   #{i + 1} {f.impact}

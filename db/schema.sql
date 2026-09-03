@@ -6,5 +6,6 @@ CREATE TABLE IF NOT EXISTS reports (
   fixes JSONB NOT NULL,
   status TEXT NOT NULL CHECK (status IN ('pending', 'ready', 'failed')),
   paid BOOLEAN NOT NULL DEFAULT FALSE,
+  report_json JSONB,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

@@ -1,20 +1,40 @@
+import { after } from "next/server";
 import { NextResponse } from "next/server";
-import { MOCK_DOMAIN } from "@/lib/mock";
-import { generateReport } from "@/lib/seams";
+import { pgStore } from "@/lib/dbreports";
+import { cleanDomain } from "@/lib/domains";
+import { infra } from "@/lib/http";
+import { getReportState, runnerFor } from "@/lib/reports";
 import { isPaid } from "@/lib/store";
 
-// Paid-gated report fetch: full content requires verified payment — the gate
-// check lives here, not just in the HMAC verify step, so direct GETs fail too.
+/**
+ * Paid-gated report fetch with 24h cache + polling.
+ * 400 bad domain → 402 unpaid → 202 run in-flight → 200 cached/fresh.
+ * Infra failure (no DB) → 503, never a bare 500.
+ */
 export async function GET(req: Request) {
-  const { searchParams } = new URL(req.url);
-  const raw = searchParams.get("domain")?.trim().toLowerCase();
-  const domain = raw ? raw.slice(0, 253) : MOCK_DOMAIN;
-  if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(domain)) {
-    return NextResponse.json({ error: "bad domain" }, { status: 400 });
+  const domain = cleanDomain(new URL(req.url).searchParams.get("domain"));
+  if (!domain) return NextResponse.json({ error: "bad domain" }, { status: 400 });
+  try {
+    if (!(await isPaid(domain))) {
+      return NextResponse.json({ error: "payment required" }, { status: 402 });
+    }
+    const state = await getReportState(domain, {
+      store: pgStore,
+      run: runnerFor(domain),
+      schedule: after,
+      now: Date.now,
+    });
+    if (state.status === "pending") {
+      return NextResponse.json({ status: "pending" }, { status: 202 });
+    }
+    return NextResponse.json({
+      status: "ready",
+      mock: true,
+      report: state.report,
+      cached: state.cached,
+      ageH: state.ageH,
+    });
+  } catch {
+    return infra();
   }
-  if (!(await isPaid(domain))) {
-    return NextResponse.json({ error: "payment required" }, { status: 402 });
-  }
-  const report = await generateReport(domain);
-  return NextResponse.json({ mock: true, report });
 }
