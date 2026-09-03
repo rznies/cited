@@ -1,11 +1,11 @@
-// Seams — stubbed in Ticket 1, real in Tickets 2 (generateReport) and 4 (scorePaste).
-// UI hangs off these; nothing else may call providers directly.
-import { MOCK_REPORT } from "./mock";
+// Seams — UI hangs off these; nothing else may call providers directly.
+// generateReport is REAL since Ticket 2 (deterministic assembly over canned
+// deps in ./scoring). scorePaste stays stubbed until Ticket 4.
+import { generateReport as assemble } from "./scoring";
 import type { AuditReport, PasteScore } from "./types";
 
-/** STUB (Ticket 2 builds the real one): returns canned report, no provider calls. */
-export async function generateReport(_domain: string): Promise<AuditReport> {
-  return MOCK_REPORT;
+export async function generateReport(domain: string): Promise<AuditReport> {
+  return assemble(domain);
 }
 
 /** STUB (Ticket 4 builds the real one): canned paste result, stateless. */
