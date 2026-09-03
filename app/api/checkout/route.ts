@@ -10,7 +10,8 @@ export async function GET(req: Request) {
   if (!domain) return NextResponse.json({ error: "bad domain" }, { status: 400 });
   try {
     return NextResponse.json({ domain, paid: await isPaid(domain) });
-  } catch {
+  } catch (e) {
+    console.error("checkout-get failed:", e instanceof Error ? e.message : e);
     return infra();
   }
 }
