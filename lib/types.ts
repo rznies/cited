@@ -42,12 +42,14 @@ export interface AuditReport {
   fixes: Fix[];
 }
 
-/** scorePaste(text, domain) contract — stateless, no cache row. */
+/** scorePaste(text, domain) contract — stateless, no cache row. Score is a
+ *  rule-based v1 heuristic (85 leads / 60 trails / 15 absent), not a model. */
 export interface PasteScore {
   mentioned: boolean;
   rankHint: string;
   competitorsFound: string[];
   oneFix: string;
+  score: number;
 }
 
 /** Row shape of the reports table (see db/schema.sql). */

@@ -1,6 +1,7 @@
 // V2 who-beats-me-first shell (Ticket 1): winners lead, both scores underneath,
 // teaser free, full report behind the gate. Paste-box lands in Ticket 4,
 // share/PDF in Ticket 5. All data stubbed via lib/seams.
+import PasteBox from "@/components/PasteBox";
 import TeaserGate from "@/components/TeaserGate";
 import { MOCK_DOMAIN } from "@/lib/mock";
 import { generateReport } from "@/lib/seams";
@@ -90,6 +91,8 @@ export default async function Home({
       </div>
 
       <TeaserGate domain={domain} />
+
+      <PasteBox domain={domain} />
     </main>
   );
 }
