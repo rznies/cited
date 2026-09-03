@@ -1,6 +1,7 @@
 // V2 who-beats-me-first shell (Ticket 1): winners lead, both scores underneath,
 // teaser free, full report behind the gate. Paste-box lands in Ticket 4,
 // share/PDF in Ticket 5. All data stubbed via lib/seams.
+import PasteBox from "@/components/PasteBox";
 import TeaserGate from "@/components/TeaserGate";
 import { MOCK_DOMAIN } from "@/lib/mock";
 import { generateReport } from "@/lib/seams";
@@ -43,8 +44,9 @@ export default async function Home({
           Who beats you <span className="mock-tag">MOCK</span>
         </h3>
         <p className="small muted">
-          FollowUpBoss 9/10, HubSpot 7/10, Zoho 5/10 — you 3/10. The score is the
-          consequence:
+          {report.winners.map((w) => `${w.name} ${w.cites}/10`).join(", ")} — you{" "}
+          {report.citationPct}% ({report.prompts.filter((p) => p.cited).length}/
+          {report.prompts.length} prompts). The score is the consequence:
         </p>
         <div className="dual">
           <div className="score-pill">
@@ -60,7 +62,7 @@ export default async function Home({
             <div className="hero-score">
               –<span style={{ fontSize: 18, color: "var(--muted)" }}>/100</span>
             </div>
-            <div className="small">Paste-box lands in Ticket 4 — never faked live</div>
+            <div className="small">Paste your ChatGPT answer below — never faked live</div>
           </div>
         </div>
         <p className="small muted">Two scores, never blended. Mock data.</p>
@@ -90,6 +92,8 @@ export default async function Home({
       </div>
 
       <TeaserGate domain={domain} />
+
+      <PasteBox domain={domain} />
     </main>
   );
 }
