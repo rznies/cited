@@ -3,6 +3,7 @@
 // share/PDF in Ticket 5. All data stubbed via lib/seams.
 import PasteBox from "@/components/PasteBox";
 import TeaserGate from "@/components/TeaserGate";
+import { cleanDomain } from "@/lib/domains";
 import { MOCK_DOMAIN } from "@/lib/mock";
 import { generateReport } from "@/lib/seams";
 import type { AuditReport } from "@/lib/types";
@@ -13,7 +14,29 @@ export default async function Home({
   searchParams: Promise<{ domain?: string }>;
 }) {
   const raw = (await searchParams).domain?.trim();
-  const domain = raw ? raw.slice(0, 253) : MOCK_DOMAIN;
+  const entered = raw && raw.length > 0 ? raw : MOCK_DOMAIN;
+  const domain = cleanDomain(entered);
+  if (!domain) {
+    return (
+      <main className="wrap">
+        <div className="card">
+          <h2>Enter a domain like example.com</h2>
+          <p className="small muted">
+            “{entered.slice(0, 80)}” doesn&apos;t look like a domain. Full URLs are fine —
+            we audit the domain part.
+          </p>
+          <form method="GET">
+            <input className="domain" name="domain" aria-label="Domain" maxLength={253} />
+            <p>
+              <button className="btn" type="submit">
+                Get teaser
+              </button>
+            </p>
+          </form>
+        </div>
+      </main>
+    );
+  }
   let report: AuditReport | null = null;
   try {
     report = await generateReport(domain);
